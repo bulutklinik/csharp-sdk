@@ -26,7 +26,9 @@ jobs:
         id: login
         uses: NuGet/login@v1
         with:
-          user: Bulutklinik
+          # NuGet trusted publishing expects the policy CREATOR's account username
+          # (muhammetsafak), not the package owner org (Bulutklinik).
+          user: muhammetsafak
       - name: Push to NuGet
         run: >
           dotnet nuget push "artifacts/*.nupkg"
