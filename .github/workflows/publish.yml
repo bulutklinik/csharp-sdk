@@ -1,14 +1,20 @@
 name: Publish
 
-# Publishes Bulutklinik.Sdk to NuGet on a vX.Y.Z tag.
-# Requires the NUGET_API_KEY secret.
+# Publishes Bulutklinik.Sdk to NuGet on a vX.Y.Z tag via Trusted Publishing (OIDC).
+# Requires a NuGet Trusted Publisher policy bound to: repo bulutklinik/csharp-sdk,
+# workflow publish.yml, environment "production". No stored API key.
 on:
   push:
     tags: ["v*"]
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -16,9 +22,14 @@ jobs:
           dotnet-version: 8.0.x
       - run: dotnet test tests/Bulutklinik.Sdk.Tests/Bulutklinik.Sdk.Tests.csproj -c Release
       - run: dotnet pack src/Bulutklinik.Sdk/Bulutklinik.Sdk.csproj -c Release -o artifacts
+      - name: NuGet login (trusted publishing)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: Bulutklinik
       - name: Push to NuGet
         run: >
           dotnet nuget push "artifacts/*.nupkg"
-          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
