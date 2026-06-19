@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Bulutklinik.Sdk;
 
 /// <summary>
@@ -28,6 +30,8 @@ public sealed class BulutklinikClient
     /// <summary>The active token store.</summary>
     public ITokenStore TokenStore { get; }
 
+    private readonly Transport _transport;
+
     public BulutklinikClient(BulutklinikClientOptions? options = null)
     {
         options ??= new BulutklinikClientOptions();
@@ -38,6 +42,7 @@ public sealed class BulutklinikClient
         var transport = new Transport(http, baseUrl, options.Lang, options.ClientId,
             options.ClientSecret, options.PartnerToken, store);
 
+        _transport = transport;
         TokenStore = store;
         Auth = new AuthResource(transport);
         Doctors = new DoctorsResource(transport);
@@ -45,5 +50,39 @@ public sealed class BulutklinikClient
         Appointments = new AppointmentsResource(transport);
         Payments = new PaymentsResource(transport);
         Measures = new MeasuresResource(transport);
+    }
+
+    /// <summary>
+    /// Escape hatch: call any Bulutklinik API endpoint that does not yet have a
+    /// typed resource method. The request still goes through the shared transport,
+    /// so default headers, the chosen <paramref name="auth"/> mode (<c>bearer</c>
+    /// by default), silent token refresh + retry, envelope unwrapping and the typed
+    /// exception hierarchy all apply. Returns the unwrapped <c>data</c> payload as a
+    /// <c>JsonElement</c>, exactly like the typed resource methods. Prefer a typed
+    /// resource method when one exists — reach for this only for endpoints the SDK
+    /// does not cover yet.
+    /// </summary>
+    /// <param name="method">HTTP method (<c>GET</c>, <c>POST</c>, <c>PUT</c>, <c>DELETE</c>).</param>
+    /// <param name="path">Path relative to the configured base URL, leading slash included (e.g. <c>/patients/allBranches</c>).</param>
+    /// <param name="auth">Auth mode: <c>"public"</c>, <c>"bearer"</c> (default) or <c>"partner"</c>; case-insensitive, blank/unknown maps to bearer.</param>
+    /// <param name="body">Optional JSON payload; omitted on <c>GET</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <example>
+    /// <code>
+    /// var branches = await client.RequestAsync(HttpMethod.Get, "/patients/allBranches");
+    /// var created = await client.RequestAsync(HttpMethod.Post, "/patients/someNewEndpoint",
+    ///     body: new { foo = "bar" });
+    /// </code>
+    /// </example>
+    public Task<JsonElement> RequestAsync(HttpMethod method, string path, string auth = "bearer",
+        object? body = null, CancellationToken cancellationToken = default)
+    {
+        AuthMode mode = auth?.Trim().ToLowerInvariant() switch
+        {
+            "public" => AuthMode.Public,
+            "partner" => AuthMode.Partner,
+            _ => AuthMode.Bearer,
+        };
+        return _transport.SendAsync(method, path, mode, body, cancellationToken);
     }
 }

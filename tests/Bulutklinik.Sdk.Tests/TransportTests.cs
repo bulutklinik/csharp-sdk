@@ -64,6 +64,34 @@ public class TransportTests
     }
 
     [Fact]
+    public async Task RequestEscapeHatchCallsArbitraryPathWithBearer()
+    {
+        var (client, handler) = Make((_, _) => (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"ok\":true}}"),
+            new InMemoryTokenStore("abc"));
+
+        var data = await client.RequestAsync(HttpMethod.Get, "/patients/customEndpoint");
+
+        Assert.True(data.GetProperty("ok").GetBoolean());
+        Assert.Equal("/patients/customEndpoint", handler.Requests[0].RequestUri!.AbsolutePath);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+        Assert.Equal("Bearer abc", handler.Requests[0].Headers.Authorization!.ToString());
+    }
+
+    [Fact]
+    public async Task RequestEscapeHatchSendsPublicPostBody()
+    {
+        var (client, handler) = Make((_, _) => (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"id\":7}}"));
+
+        var data = await client.RequestAsync(HttpMethod.Post, "/general/somePublicEndpoint", "public",
+            new { foo = "bar" });
+
+        Assert.Equal(7, data.GetProperty("id").GetInt32());
+        Assert.Equal(HttpMethod.Post, handler.Requests[0].Method);
+        Assert.Null(handler.Requests[0].Headers.Authorization);
+        Assert.Contains("\"foo\":\"bar\"", handler.Bodies[0]);
+    }
+
+    [Fact]
     public async Task MapsValidation()
     {
         var (client, _) = Make((_, _) => (HttpStatusCode.UnprocessableEntity, "{\"resultType\":1,\"errorType\":\"validation\"}"),
