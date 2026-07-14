@@ -58,6 +58,20 @@ public sealed class RegisterInput
     public string? ClientSecret { get; set; }
 }
 
+/// <summary>
+/// AI meal-photo analysis parameters. Idiomatic names map to the API's snake_case
+/// body (<c>portion_size</c>, <c>portion_grams</c>, <c>meal_type</c>).
+/// <see cref="PortionGrams"/> is required when <see cref="PortionSize"/> is <c>"custom"</c>.
+/// </summary>
+public sealed class MealAnalyzeInput
+{
+    public required string Image { get; set; }
+    public required string PortionSize { get; set; }
+    public int? PortionGrams { get; set; }
+    public required string MealType { get; set; }
+    public string? Note { get; set; }
+}
+
 /// <summary>Configuration for <see cref="BulutklinikClient"/>.</summary>
 public sealed class BulutklinikClientOptions
 {

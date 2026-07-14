@@ -26,6 +26,8 @@ public sealed class BulutklinikClient
     public AppointmentsResource Appointments { get; }
     public PaymentsResource Payments { get; }
     public MeasuresResource Measures { get; }
+    public SkinResource Skin { get; }
+    public MealsResource Meals { get; }
 
     /// <summary>The active token store.</summary>
     public ITokenStore TokenStore { get; }
@@ -50,6 +52,8 @@ public sealed class BulutklinikClient
         Appointments = new AppointmentsResource(transport);
         Payments = new PaymentsResource(transport);
         Measures = new MeasuresResource(transport);
+        Skin = new SkinResource(transport);
+        Meals = new MealsResource(transport);
     }
 
     /// <summary>

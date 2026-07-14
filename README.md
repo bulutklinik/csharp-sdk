@@ -4,7 +4,8 @@ Official Bulutklinik API SDK for .NET (net8.0). Async (`HttpClient`),
 nullable-enabled, `System.Text.Json`.
 
 Covers the patient flow: **auth, doctor search, slots, appointments, payments,
-and health measures**. See [`DESIGN.md`](./DESIGN.md) for the full wire contract.
+health measures, and AI image analysis**. See [`DESIGN.md`](./DESIGN.md) for the
+full wire contract.
 
 ## Install
 
@@ -55,6 +56,8 @@ await client.Appointments.ReserveInterviewAsync(doctorId, "2026-06-20 14:30");
 | `client.Appointments`  | `ReserveInterview`, `AddPhysical`, `Cancel` |
 | `client.Payments`      | `CheckDiscountCode`, `GetCards`, `SaveCard`, `Pay`, `DeleteCard` |
 | `client.Measures`      | `AddList`, `Add`, `Update`, `Delete`, `Last`, `List`, `Graph`, `PartnerHealthInformation` |
+| `client.Skin`          | `Analyze` |
+| `client.Meals`         | `Analyze` |
 
 Data methods return `System.Text.Json.JsonElement`. All accept a `CancellationToken`.
 
@@ -91,6 +94,32 @@ catch (ValidationException e)
 
 `Payments.PayAsync` returns data containing `payment3DUrl` on a 3DS flow — a
 browser URL to open. The bank → server callback completes the capture.
+
+## AI image analysis
+
+`Skin.AnalyzeAsync` ("Cildimde Neyim Var") classifies one or more skin photos;
+`Meals.AnalyzeAsync` estimates calories/nutrition from a meal photo. Both return
+the `data` payload verbatim as a `JsonElement`.
+
+```csharp
+// Skin — a loose array of images (branch_id optional), like Measures.AddList
+var skin = await client.Skin.AnalyzeAsync(new IDictionary<string, object?>[]
+{
+    new Dictionary<string, object?> { ["image"] = base64Jpeg, ["branch_id"] = 42 },
+});
+// The opaque case_detail blob can be forwarded verbatim as a payment's caseDetail.
+
+// Meals — typed input mapped to the API's snake_case body (portion_grams/note
+// are sent only when set; PortionGrams is required when PortionSize == "custom")
+var meal = await client.Meals.AnalyzeAsync(new MealAnalyzeInput
+{
+    Image = base64Jpeg,
+    PortionSize = "custom",
+    PortionGrams = 300,
+    MealType = "lunch",
+    Note = "az yağlı",
+});
+```
 
 ## Development
 

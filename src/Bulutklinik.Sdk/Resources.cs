@@ -332,3 +332,55 @@ public sealed class MeasuresResource
         return _t.SendAsync(HttpMethod.Post, "/outher/healthInformation", AuthMode.Partner, body, cancellationToken);
     }
 }
+
+/// <summary>"Cildimde Neyim Var" — AI skin-lesion analysis.</summary>
+public sealed class SkinResource
+{
+    private readonly Transport _t;
+
+    internal SkinResource(Transport transport) => _t = transport;
+
+    /// <summary>
+    /// Analyze one or more skin photos. Each item is <c>{ "image": "&lt;base64&gt;", "branch_id"?: &lt;int&gt; }</c>
+    /// (<c>branch_id</c> optional); mirrors <c>Measures.AddListAsync</c> — a loose array of records. The
+    /// returned <c>data</c> is passed through verbatim, including the opaque <c>case_detail</c> blob, which
+    /// can be forwarded as a payment's <c>caseDetail</c>.
+    /// </summary>
+    public Task<JsonElement> AnalyzeAsync(IEnumerable<IDictionary<string, object?>> images, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?> { ["images"] = images };
+        return _t.SendAsync(HttpMethod.Post, "/patients/imageCheck", AuthMode.Bearer, body, cancellationToken);
+    }
+}
+
+/// <summary>AI meal-photo calorie/nutrition estimation (sibling of <c>Skin</c>).</summary>
+public sealed class MealsResource
+{
+    private readonly Transport _t;
+
+    internal MealsResource(Transport transport) => _t = transport;
+
+    /// <summary>
+    /// Estimate calories and nutrition from a meal photo. Idiomatic input names map to the API's
+    /// snake_case body (<c>portion_size</c>, <c>portion_grams</c>, <c>meal_type</c>); <c>portion_grams</c>
+    /// and <c>note</c> are sent only when non-null.
+    /// </summary>
+    public Task<JsonElement> AnalyzeAsync(MealAnalyzeInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["image"] = input.Image,
+            ["portion_size"] = input.PortionSize,
+            ["meal_type"] = input.MealType,
+        };
+        if (input.PortionGrams is not null)
+        {
+            body["portion_grams"] = input.PortionGrams;
+        }
+        if (input.Note is not null)
+        {
+            body["note"] = input.Note;
+        }
+        return _t.SendAsync(HttpMethod.Post, "/patients/imageAnalyzeMeal", AuthMode.Bearer, body, cancellationToken);
+    }
+}
