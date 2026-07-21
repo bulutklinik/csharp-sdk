@@ -50,16 +50,17 @@ await client.Appointments.ReserveInterviewAsync(doctorId, "2026-06-20 14:30");
 
 | Property               | Methods (all `…Async`) |
 |------------------------|------------------------|
-| `client.Auth`          | `Connect`, `ConnectWithTwoFactor`, `VerifyRegistration`, `Register`, `Refresh`, `Disconnect` |
+| `client.Auth`          | `Connect`, `ConnectWithTwoFactor`, `VerifyRegistration`, `ConfirmRegistrationEmail`, `Register`, `VerifyRegistrationSocial`, `RegisterSocial`, `ForgotPassword`, `ResetPassword`, `Refresh`, `Disconnect` |
 | `client.Doctors`       | `Branches`, `Locations`, `QuickSearch`, `Search`, `Detail` |
 | `client.Slots`         | `Schedule` |
-| `client.Appointments`  | `ReserveInterview`, `AddPhysical`, `Cancel` |
+| `client.Appointments`  | `ReserveInterview`, `AddPhysical`, `Cancel`, `List`, `Reservations` |
 | `client.Payments`      | `CheckDiscountCode`, `GetCards`, `SaveCard`, `Pay`, `DeleteCard` |
 | `client.Measures`      | `AddList`, `Add`, `Update`, `Delete`, `Last`, `List`, `Graph`, `PartnerHealthInformation` |
 | `client.Skin`          | `Analyze` |
 | `client.Meals`         | `Analyze` |
 | `client.Laboratory`    | `Results`, `ResultDetail`, `Catalog`, `CatalogDetail`, `Order` |
 | `client.Diets`         | `List`, `Detail` |
+| `client.Addresses`     | `List`, `Add`, `Update`, `Delete` |
 
 Data methods return `System.Text.Json.JsonElement`. All accept a `CancellationToken`.
 

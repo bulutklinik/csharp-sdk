@@ -4,6 +4,27 @@ All notable changes to `Bulutklinik.Sdk` are documented here. The format is base
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0]
+
+### Added
+
+- `client.Auth.ConfirmRegistrationEmailAsync(input)` — the **required** e-mail-branch middle
+  step of registration (`POST /patients/emailConfirmationRegister`). A headerless SDK
+  caller always gets `confirmationType "email"` from `VerifyRegistrationAsync`; confirm the
+  e-mailed code here to receive the SMS blob that `RegisterAsync` consumes (without it,
+  `RegisterAsync` returns 501).
+- Social sign-up: `client.Auth.VerifyRegistrationSocialAsync(input)` +
+  `client.Auth.RegisterSocialAsync(input)` (both public; `RegisterSocialAsync` does not
+  auto-login — call `ConnectAsync` with loginMode `social` after).
+- Password reset: `client.Auth.ForgotPasswordAsync(input)` + `client.Auth.ResetPasswordAsync(input)`.
+- `client.Appointments.ListAsync(page?)` (`GET /patients/userAppointments`) — the source of the
+  `event_id` that `CancelAsync` requires — and `client.Appointments.ReservationsAsync()`.
+- New `client.Addresses` group (`ListAsync`/`AddAsync`/`UpdateAsync`/`DeleteAsync`) over
+  `/patients/userAddress`, required by `Laboratory.OrderAsync` (which needs an `addressId`).
+- Types: `ConfirmRegistrationEmailInput`, `VerifyRegistrationSocialInput`,
+  `RegisterSocialInput`, `ForgotPasswordInput`, `ResetPasswordInput`, `AddressInput`,
+  `AddressUpdateInput`.
+
 ## [0.5.0]
 
 ### Added

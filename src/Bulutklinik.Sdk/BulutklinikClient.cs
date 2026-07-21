@@ -30,6 +30,7 @@ public sealed class BulutklinikClient
     public MealsResource Meals { get; }
     public LaboratoryResource Laboratory { get; }
     public DietsResource Diets { get; }
+    public AddressesResource Addresses { get; }
 
     /// <summary>The active token store.</summary>
     public ITokenStore TokenStore { get; }
@@ -58,6 +59,7 @@ public sealed class BulutklinikClient
         Meals = new MealsResource(transport);
         Laboratory = new LaboratoryResource(transport);
         Diets = new DietsResource(transport);
+        Addresses = new AddressesResource(transport);
     }
 
     /// <summary>

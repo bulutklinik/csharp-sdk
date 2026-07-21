@@ -89,6 +89,93 @@ public sealed class AuthResource
             .ConfigureAwait(false));
     }
 
+    /// <summary>
+    /// Step 2 of e-mail-branch registration. When <c>VerifyRegistrationAsync</c> returned
+    /// <c>confirmationType "email"</c>, confirm the e-mailed code here with the same
+    /// <c>response</c> blob; the server sends an SMS code and returns a fresh <c>response</c>
+    /// blob (<c>confirmationType "sms"</c>) to feed into <c>RegisterAsync</c>. Public.
+    /// </summary>
+    public Task<JsonElement> ConfirmRegistrationEmailAsync(ConfirmRegistrationEmailInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["verificationCode"] = input.VerificationCode,
+            ["response"] = input.Response,
+        };
+        if (input.UserAgreements is not null) body["userAgreements"] = input.UserAgreements;
+        return _t.SendAsync(HttpMethod.Post, "/patients/emailConfirmationRegister", AuthMode.Public, body, cancellationToken);
+    }
+
+    /// <summary>
+    /// Step 1 of social sign-up: send the SMS code and return the raw <c>data</c> holding
+    /// the <c>response</c> blob. Public — no CAPTCHA and no partner token. Feed
+    /// <c>response</c> + the SMS code into <c>RegisterSocialAsync</c>.
+    /// </summary>
+    public Task<JsonElement> VerifyRegistrationSocialAsync(VerifyRegistrationSocialInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["name"] = input.Name,
+            ["surname"] = input.Surname,
+            ["phoneNumber"] = input.PhoneNumber,
+            ["password"] = input.Password,
+            ["passwordAgain"] = input.Password,
+            ["socialType"] = input.SocialType,
+            ["key"] = input.Key,
+            ["acceptUserAgreement"] = input.AcceptUserAgreement == 0 ? 1 : input.AcceptUserAgreement,
+        };
+        if (input.Email is not null) body["email"] = input.Email;
+        if (input.UserAgreements is not null) body["userAgreements"] = input.UserAgreements;
+        return _t.SendAsync(HttpMethod.Post, "/patients/verifyAddingNewPatientSocial", AuthMode.Public, body, cancellationToken);
+    }
+
+    /// <summary>
+    /// Step 2 of social sign-up: create the social patient. Unlike <c>RegisterAsync</c> this
+    /// does NOT log in — call <c>ConnectAsync</c> with <c>loginMode "social"</c> afterwards. Public.
+    /// </summary>
+    public async Task RegisterSocialAsync(RegisterSocialInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["smsVerificationCode"] = input.SmsVerificationCode,
+            ["response"] = input.Response,
+        };
+        if (input.UserAgreements is not null) body["userAgreements"] = input.UserAgreements;
+        await _t.SendAsync(HttpMethod.Post, "/patients/addNewPatientWithSocial", AuthMode.Public, body, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Step 1 of password reset: send the SMS confirm code to a registered phone and return
+    /// the raw <c>data</c> holding the <c>response</c> blob. A CAPTCHA token (<c>RecaptchaV2</c>
+    /// or <c>Captcha</c>) is required outside the local environment. Public.
+    /// </summary>
+    public Task<JsonElement> ForgotPasswordAsync(ForgotPasswordInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?> { ["phoneNumber"] = input.PhoneNumber };
+        if (input.Birthdate is not null) body["birthdate"] = input.Birthdate;
+        if (input.RecaptchaV2 is not null) body["g-recaptcha-response-v2"] = input.RecaptchaV2;
+        if (input.Captcha is not null) body["captcha"] = input.Captcha;
+        return _t.SendAsync(HttpMethod.Post, "/patients/forgotPassword", AuthMode.Public, body, cancellationToken);
+    }
+
+    /// <summary>
+    /// Step 2 of password reset: set the new password using the SMS confirm code and the
+    /// <c>response</c> blob from <c>ForgotPasswordAsync</c>. Public.
+    /// </summary>
+    public async Task ResetPasswordAsync(ResetPasswordInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["smsConfirmCode"] = input.SmsConfirmCode,
+            ["response"] = input.Response,
+            ["password"] = input.Password,
+            ["passwordAgain"] = input.Password,
+        };
+        await _t.SendAsync(HttpMethod.Put, "/patients/forgotPassword", AuthMode.Public, body, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public Task RefreshAsync(CancellationToken cancellationToken = default) => _t.RefreshAsync(cancellationToken);
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
@@ -233,6 +320,81 @@ public sealed class AppointmentsResource
 
     public Task<JsonElement> CancelAsync(object eventId, CancellationToken cancellationToken = default) =>
         _t.SendAsync(HttpMethod.Delete, $"/patients/deleteUserAppointment/{eventId}", AuthMode.Bearer, null, cancellationToken);
+
+    /// <summary>
+    /// The patient's appointments (<c>{ foundAppointmentsCount, foundAppointments }</c>). Each
+    /// item's <c>event_id</c> is the id for <c>CancelAsync</c>; rows with <c>event_id "0"</c> are
+    /// paid-order/refund entries (not cancellable). Server paging is disabled, so <paramref name="page"/>
+    /// &lt;= 1 (the default) returns the full list; pass <c>null</c> to omit the page segment.
+    /// </summary>
+    public Task<JsonElement> ListAsync(object? page = null, CancellationToken cancellationToken = default)
+    {
+        var path = page is null ? "/patients/userAppointments" : $"/patients/userAppointments/{page}";
+        return _t.SendAsync(HttpMethod.Get, path, AuthMode.Bearer, null, cancellationToken);
+    }
+
+    /// <summary>The patient's active online-slot reservation holds (with a <c>minute_diff</c> countdown).</summary>
+    public Task<JsonElement> ReservationsAsync(CancellationToken cancellationToken = default) =>
+        _t.SendAsync(HttpMethod.Get, "/patients/userReservations", AuthMode.Bearer, null, cancellationToken);
+}
+
+/// <summary>
+/// The patient's saved addresses. Required by <c>Laboratory.OrderAsync</c> (which needs an
+/// <c>addressId</c>). <c>Add</c>/<c>Update</c> take a <c>CityId</c> (from <c>Doctors.LocationsAsync</c>)
+/// and a <c>DistrictId</c> (from <c>GET /getConfig</c> — <c>cities[].districts[]</c>).
+/// </summary>
+public sealed class AddressesResource
+{
+    private readonly Transport _t;
+
+    internal AddressesResource(Transport transport) => _t = transport;
+
+    /// <summary>List saved addresses (default first). Each item's <c>id</c> is the <c>addressId</c>.</summary>
+    public Task<JsonElement> ListAsync(CancellationToken cancellationToken = default) =>
+        _t.SendAsync(HttpMethod.Get, "/patients/userAddress", AuthMode.Bearer, null, cancellationToken);
+
+    /// <summary>Add an address. Success → <c>{ addressId }</c>. The first address is always the default.</summary>
+    public Task<JsonElement> AddAsync(AddressInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["title"] = input.Title,
+            ["cityId"] = input.CityId,
+            ["districtId"] = input.DistrictId,
+            ["address"] = input.Address,
+            ["locationLat"] = input.LocationLat,
+            ["locationLng"] = input.LocationLng,
+        };
+        if (input.Description is not null) body["description"] = input.Description;
+        if (input.IsDefault is not null) body["isDefault"] = input.IsDefault;
+        return _t.SendAsync(HttpMethod.Post, "/patients/userAddress", AuthMode.Bearer, body, cancellationToken);
+    }
+
+    /// <summary>
+    /// Update an address by <c>Id</c>. Send <c>{ Id, IsDefault = 1 }</c> to only flip the default
+    /// flag, or the other fields to edit it (null fields are omitted).
+    /// </summary>
+    public Task<JsonElement> UpdateAsync(AddressUpdateInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?> { ["id"] = input.Id };
+        if (input.Title is not null) body["title"] = input.Title;
+        if (input.Description is not null) body["description"] = input.Description;
+        if (input.CityId is not null) body["cityId"] = input.CityId;
+        if (input.DistrictId is not null) body["districtId"] = input.DistrictId;
+        if (input.Address is not null) body["address"] = input.Address;
+        if (input.LocationLat is not null) body["locationLat"] = input.LocationLat;
+        if (input.LocationLng is not null) body["locationLng"] = input.LocationLng;
+        if (input.IsDefault is not null) body["isDefault"] = input.IsDefault;
+        return _t.SendAsync(HttpMethod.Put, "/patients/userAddress", AuthMode.Bearer, body, cancellationToken);
+    }
+
+    /// <summary>
+    /// Delete an address by id (sent in the body). The default address cannot be deleted
+    /// (reassign the default via <c>UpdateAsync</c> first), nor can one already used on an order.
+    /// </summary>
+    public Task<JsonElement> DeleteAsync(object id, CancellationToken cancellationToken = default) =>
+        _t.SendAsync(HttpMethod.Delete, "/patients/userAddress", AuthMode.Bearer,
+            new Dictionary<string, object?> { ["id"] = id }, cancellationToken);
 }
 
 /// <summary>Discount check, saved cards and the 3DS payment entrypoint.</summary>
