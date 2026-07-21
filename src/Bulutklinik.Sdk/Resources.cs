@@ -43,6 +43,33 @@ public sealed class AuthResource
             .ConfigureAwait(false));
     }
 
+    /// <summary>
+    /// Step 1 of registration: send the SMS/e-mail verification code and return the
+    /// raw <c>data</c> containing the encrypted <c>response</c> blob. Uses the
+    /// configured partner token (the endpoint is behind <c>auth:apiusers</c>, not
+    /// public). A CAPTCHA token (<c>RecaptchaV2</c> or <c>Captcha</c>), minted by a
+    /// browser/human, is required. Feed the returned <c>response</c> (and the code the
+    /// user receives) into <see cref="RegisterAsync"/>.
+    /// </summary>
+    public Task<JsonElement> VerifyRegistrationAsync(VerifyRegistrationInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["name"] = input.Name,
+            ["surname"] = input.Surname,
+            ["phoneNumber"] = input.PhoneNumber,
+            ["phone_code"] = input.PhoneCode,
+            ["email"] = input.Email,
+            ["password"] = input.Password,
+            ["passwordAgain"] = input.Password,
+            ["acceptUserAgreement"] = input.AcceptUserAgreement == 0 ? 1 : input.AcceptUserAgreement,
+        };
+        if (input.RecaptchaV2 is not null) body["g-recaptcha-response-v2"] = input.RecaptchaV2;
+        if (input.Captcha is not null) body["captcha"] = input.Captcha;
+        if (input.UserAgreements is not null) body["userAgreements"] = input.UserAgreements;
+        return _t.SendAsync(HttpMethod.Post, "/patients/verifyAddingNewPatient", AuthMode.Partner, body, cancellationToken);
+    }
+
     public async Task RegisterAsync(RegisterInput input, CancellationToken cancellationToken = default)
     {
         var body = new Dictionary<string, object?>

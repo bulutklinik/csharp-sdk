@@ -59,6 +59,31 @@ public sealed class RegisterInput
 }
 
 /// <summary>
+/// Input for the registration verify step (<c>auth.VerifyRegistrationAsync</c>).
+/// The endpoint requires a CAPTCHA token (<see cref="RecaptchaV2"/> or
+/// <see cref="Captcha"/>) minted by a browser/human, and is authorized with the
+/// configured partner token (it is behind <c>auth:apiusers</c>, not public).
+/// </summary>
+public sealed class VerifyRegistrationInput
+{
+    public required string Name { get; set; }
+    public required string Surname { get; set; }
+    /// <summary>Must start with <c>+</c> and country code, e.g. <c>+90 555 111 22 33</c>.</summary>
+    public required string PhoneNumber { get; set; }
+    /// <summary>Country dial code only, e.g. <c>+90</c> (matches <c>^\+\d{1,3}$</c>).</summary>
+    public required string PhoneCode { get; set; }
+    public required string Email { get; set; }
+    public required string Password { get; set; }
+    public int AcceptUserAgreement { get; set; } = 1;
+    /// <summary>reCAPTCHA v2 token → sent as <c>g-recaptcha-response-v2</c>. Provide this or <see cref="Captcha"/>.</summary>
+    public string? RecaptchaV2 { get; set; }
+    /// <summary>Alternative CAPTCHA token → sent as <c>captcha</c>. Provide this or <see cref="RecaptchaV2"/>.</summary>
+    public string? Captcha { get; set; }
+    /// <summary>Optional structured agreement approvals, passed through verbatim.</summary>
+    public object?[]? UserAgreements { get; set; }
+}
+
+/// <summary>
 /// AI meal-photo analysis parameters. Idiomatic names map to the API's snake_case
 /// body (<c>portion_size</c>, <c>portion_grams</c>, <c>meal_type</c>).
 /// <see cref="PortionGrams"/> is required when <see cref="PortionSize"/> is <c>"custom"</c>.

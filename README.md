@@ -50,7 +50,7 @@ await client.Appointments.ReserveInterviewAsync(doctorId, "2026-06-20 14:30");
 
 | Property               | Methods (all `…Async`) |
 |------------------------|------------------------|
-| `client.Auth`          | `Connect`, `ConnectWithTwoFactor`, `Register`, `Refresh`, `Disconnect` |
+| `client.Auth`          | `Connect`, `ConnectWithTwoFactor`, `VerifyRegistration`, `Register`, `Refresh`, `Disconnect` |
 | `client.Doctors`       | `Branches`, `Locations`, `QuickSearch`, `Search`, `Detail` |
 | `client.Slots`         | `Schedule` |
 | `client.Appointments`  | `ReserveInterview`, `AddPhysical`, `Cancel` |
