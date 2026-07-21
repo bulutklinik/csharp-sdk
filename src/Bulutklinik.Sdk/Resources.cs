@@ -384,3 +384,64 @@ public sealed class MealsResource
         return _t.SendAsync(HttpMethod.Post, "/patients/imageAnalyzeMeal", AuthMode.Bearer, body, cancellationToken);
     }
 }
+
+/// <summary>The patient's lab results, the orderable test catalog, and test pre-ordering.</summary>
+public sealed class LaboratoryResource
+{
+    private readonly Transport _t;
+
+    internal LaboratoryResource(Transport transport) => _t = transport;
+
+    /// <summary>The patient's completed/in-progress lab results. <paramref name="page"/> defaults to 1 server-side when omitted.</summary>
+    public Task<JsonElement> ResultsAsync(int? page = null, CancellationToken cancellationToken = default)
+    {
+        string path = "/patients/userLabTestList" + (page is not null ? $"/{page}" : "");
+        return _t.SendAsync(HttpMethod.Get, path, AuthMode.Bearer, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// One lab result's detail. <paramref name="testId"/> is a <b>string</b> — pass the id from a
+    /// <see cref="ResultsAsync"/> item verbatim (a plain id like <c>"123"</c> or a TMC-lab id like <c>"4821-lab"</c>).
+    /// </summary>
+    public Task<JsonElement> ResultDetailAsync(string testId, CancellationToken cancellationToken = default) =>
+        _t.SendAsync(HttpMethod.Get, $"/patients/userLabTestDetail/{testId}", AuthMode.Bearer, null, cancellationToken);
+
+    /// <summary>The orderable laboratory test-group catalog.</summary>
+    public Task<JsonElement> CatalogAsync(CancellationToken cancellationToken = default) =>
+        _t.SendAsync(HttpMethod.Get, "/patients/allLaboratoryTests", AuthMode.Bearer, null, cancellationToken);
+
+    /// <summary>One catalog test group.</summary>
+    public Task<JsonElement> CatalogDetailAsync(string id, CancellationToken cancellationToken = default) =>
+        _t.SendAsync(HttpMethod.Get, $"/patients/laboratoryTestDetail/{id}", AuthMode.Bearer, null, cancellationToken);
+
+    /// <summary>Pre-order a laboratory test. All three ids are required; success returns <c>{ preOrderId }</c>.</summary>
+    public Task<JsonElement> OrderAsync(LabOrderInput input, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["testId"] = input.TestId,
+            ["addressId"] = input.AddressId,
+            ["laboratoryId"] = input.LaboratoryId,
+        };
+        return _t.SendAsync(HttpMethod.Post, "/patients/addNewLaboratoryTest", AuthMode.Bearer, body, cancellationToken);
+    }
+}
+
+/// <summary>The patient's diet lists (a dietitian's "Diyet Listesi").</summary>
+public sealed class DietsResource
+{
+    private readonly Transport _t;
+
+    internal DietsResource(Transport transport) => _t = transport;
+
+    /// <summary>The patient's diet lists. <paramref name="page"/> defaults to 1 server-side when omitted (page size fixed to 10).</summary>
+    public Task<JsonElement> ListAsync(int? page = null, CancellationToken cancellationToken = default)
+    {
+        string path = "/patients/dietLists" + (page is not null ? $"/{page}" : "");
+        return _t.SendAsync(HttpMethod.Get, path, AuthMode.Bearer, null, cancellationToken);
+    }
+
+    /// <summary>One diet list's detail (an array of meal-time groups). <paramref name="listId"/> is a <c>list_id</c> from a <see cref="ListAsync"/> item.</summary>
+    public Task<JsonElement> DetailAsync(string listId, CancellationToken cancellationToken = default) =>
+        _t.SendAsync(HttpMethod.Get, $"/patients/diet/{listId}", AuthMode.Bearer, null, cancellationToken);
+}

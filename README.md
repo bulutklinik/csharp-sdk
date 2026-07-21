@@ -4,8 +4,8 @@ Official Bulutklinik API SDK for .NET (net8.0). Async (`HttpClient`),
 nullable-enabled, `System.Text.Json`.
 
 Covers the patient flow: **auth, doctor search, slots, appointments, payments,
-health measures, and AI image analysis**. See [`DESIGN.md`](./DESIGN.md) for the
-full wire contract.
+health measures, AI image analysis, lab results, and diet lists**. See
+[`DESIGN.md`](./DESIGN.md) for the full wire contract.
 
 ## Install
 
@@ -58,6 +58,8 @@ await client.Appointments.ReserveInterviewAsync(doctorId, "2026-06-20 14:30");
 | `client.Measures`      | `AddList`, `Add`, `Update`, `Delete`, `Last`, `List`, `Graph`, `PartnerHealthInformation` |
 | `client.Skin`          | `Analyze` |
 | `client.Meals`         | `Analyze` |
+| `client.Laboratory`    | `Results`, `ResultDetail`, `Catalog`, `CatalogDetail`, `Order` |
+| `client.Diets`         | `List`, `Detail` |
 
 Data methods return `System.Text.Json.JsonElement`. All accept a `CancellationToken`.
 

@@ -72,6 +72,12 @@ public sealed class MealAnalyzeInput
     public string? Note { get; set; }
 }
 
+/// <summary>
+/// Laboratory test pre-order parameters. All three ids are required; they map to the
+/// API's <c>testId</c>/<c>addressId</c>/<c>laboratoryId</c> body fields.
+/// </summary>
+public sealed record LabOrderInput(object TestId, object AddressId, object LaboratoryId);
+
 /// <summary>Configuration for <see cref="BulutklinikClient"/>.</summary>
 public sealed class BulutklinikClientOptions
 {

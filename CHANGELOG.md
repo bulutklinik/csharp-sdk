@@ -4,6 +4,20 @@ All notable changes to `Bulutklinik.Sdk` are documented here. The format is base
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0]
+
+### Added
+
+- `client.Laboratory` — the patient's lab results, orderable test catalog and test
+  pre-ordering: `ResultsAsync(page?)` (`GET /patients/userLabTestList/{page?}`),
+  `ResultDetailAsync(testId)` (`GET /patients/userLabTestDetail/{testId}`, `testId` is a
+  string — may carry a `-lab` suffix), `CatalogAsync` (`GET /patients/allLaboratoryTests`),
+  `CatalogDetailAsync(id)` (`GET /patients/laboratoryTestDetail/{id}`) and
+  `OrderAsync(input)` (`POST /patients/addNewLaboratoryTest`).
+- `client.Diets` — the patient's diet lists: `ListAsync(page?)` (`GET /patients/dietLists/{page?}`)
+  and `DetailAsync(listId)` (`GET /patients/diet/{listId}`).
+- Type: `LabOrderInput`.
+
 ## [0.3.0]
 
 ### Added
