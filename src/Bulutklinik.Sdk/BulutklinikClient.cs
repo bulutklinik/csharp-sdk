@@ -32,6 +32,13 @@ public sealed class BulutklinikClient
     public DietsResource Diets { get; }
     public AddressesResource Addresses { get; }
 
+    /// <summary>
+    /// The company-scoped partner surface (<c>/outher</c>). Uses the configured
+    /// <c>PartnerToken</c> instead of a patient login; data is limited to your own
+    /// company and the patient is named inline on each call.
+    /// </summary>
+    public PartnerNamespace Partner { get; }
+
     /// <summary>The active token store.</summary>
     public ITokenStore TokenStore { get; }
 
@@ -60,6 +67,7 @@ public sealed class BulutklinikClient
         Laboratory = new LaboratoryResource(transport);
         Diets = new DietsResource(transport);
         Addresses = new AddressesResource(transport);
+        Partner = new PartnerNamespace(transport);
     }
 
     /// <summary>
