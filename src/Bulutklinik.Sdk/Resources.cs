@@ -80,6 +80,12 @@ public sealed class DoctorsResource
 
     internal DoctorsResource(Transport transport) => _t = transport;
 
+    /// <summary>
+    /// Filtered doctor search. <paramref name="searchParams"/> must carry at least
+    /// one key: the server rule is <c>required|array</c> and PHP's <c>required</c>
+    /// rejects an empty array, so an empty dictionary is a validation error rather
+    /// than an unfiltered search.
+    /// </summary>
     public Task<JsonElement> SearchAsync(IDictionary<string, object?> searchParams, int currentPage = 1,
         IEnumerable<string>? orderParams = null, CancellationToken cancellationToken = default)
     {
