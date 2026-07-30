@@ -187,7 +187,7 @@ public class TransportTests
     }
 
     [Fact]
-    public async Task ExpiredTokenIsNotRetried()
+    public async Task ExpiredTokenIsNotRetriedWithoutARefreshToken()
     {
         int attempts = 0;
         var store = new InMemoryTokenStore("expired");
@@ -199,7 +199,7 @@ public class TransportTests
 
         var ex = await Assert.ThrowsAsync<AuthenticationException>(() => client.Measures.LastAsync(Ref));
 
-        Assert.Contains("cannot refresh it", ex.Message);
+        Assert.Contains("could not be refreshed", ex.Message);
         Assert.Equal(1, attempts);
         // An expired token is kept: the caller may want to inspect it while
         // installing the replacement. Only a revoked one is cleared.

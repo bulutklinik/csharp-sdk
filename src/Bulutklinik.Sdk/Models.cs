@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Bulutklinik.Sdk;
 
 /// <summary>
@@ -10,6 +12,15 @@ namespace Bulutklinik.Sdk;
 /// </summary>
 public sealed class BulutklinikClientOptions
 {
+    /// <summary>
+    /// OAuth client id from your portal application. Used by
+    /// <c>Auth.ConnectAsync</c> and by the silent refresh.
+    /// </summary>
+    public string? ClientId { get; set; }
+
+    /// <summary>OAuth client secret from your portal application.</summary>
+    public string? ClientSecret { get; set; }
+
     /// <summary>Named environment preset. Ignored when <see cref="BaseUrl"/> is set.</summary>
     public BulutklinikEnvironment Environment { get; set; } = BulutklinikEnvironment.Production;
 
@@ -26,8 +37,9 @@ public sealed class BulutklinikClientOptions
     public string Lang { get; set; } = "tr";
 
     /// <summary>
-    /// The partner token issued for your integration. Seeds the default in-memory
-    /// token store. Mutually exclusive with <see cref="TokenStore"/>.
+    /// An already-minted access token, for callers who do not want the SDK to log
+    /// in. Seeds the default in-memory token store. Mutually exclusive with
+    /// <see cref="TokenStore"/>.
     /// </summary>
     public string? PartnerToken { get; set; }
 
@@ -42,3 +54,15 @@ public sealed class BulutklinikClientOptions
 
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 }
+
+/// <summary>
+/// Result of <c>Auth.ConnectAsync</c>.
+/// <para>
+/// When <see cref="TwoFactorRequired"/> is true no tokens were stored and
+/// <see cref="TwoFactorResponse"/> carries the server's challenge blob.
+/// </para>
+/// </summary>
+public sealed record LoginResult(
+    bool TwoFactorRequired,
+    string? TwoFactorResponse = null,
+    JsonElement? PasswordPolicy = null);

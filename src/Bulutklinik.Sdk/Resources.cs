@@ -386,3 +386,101 @@ public sealed class MeasuresResource
         return body;
     }
 }
+
+/// <summary>
+/// Token lifecycle.
+/// <para>
+/// The Developer Platform issues a <b>client id</b>, a <b>client secret</b> and a
+/// project-specific <b>service identity</b> per approved application; the password
+/// is the one set when registering on the portal. <see cref="ConnectAsync"/>
+/// exchanges those for an access + refresh token pair, which every other resource
+/// then uses.
+/// </para>
+/// <para>
+/// Neither <see cref="ConnectAsync"/> nor <see cref="RefreshAsync"/> is
+/// partner-authenticated: they are the two public endpoints that <i>produce</i>
+/// the credential.
+/// </para>
+/// </summary>
+public sealed class AuthResource
+{
+    private readonly Transport _t;
+
+    internal AuthResource(Transport transport) => _t = transport;
+
+    /// <summary>
+    /// Log in and store the resulting tokens. <paramref name="clientId"/> and
+    /// <paramref name="clientSecret"/> fall back to the values the client was
+    /// constructed with.
+    /// <para>
+    /// If the account has SMS 2FA enabled the API returns a challenge instead of a
+    /// token pair; the result reports <c>TwoFactorRequired</c> rather than throwing.
+    /// </para>
+    /// </summary>
+    public async Task<LoginResult> ConnectAsync(string apiUserName, string apiUserPassword,
+        string? clientId = null, string? clientSecret = null, string loginMode = "email",
+        CancellationToken cancellationToken = default)
+    {
+        string? id = clientId ?? _t.ClientId;
+        string? secret = clientSecret ?? _t.ClientSecret;
+        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(secret))
+        {
+            throw new ArgumentException(
+                "ClientId and ClientSecret are required — pass them to ConnectAsync or set them on the options.");
+        }
+
+        var data = await _t.SendAsync(HttpMethod.Post, "/general/connectApi", AuthMode.Public, new
+        {
+            apiClientId = id,
+            apiSecretKey = secret,
+            apiUserName,
+            apiUserPassword,
+            loginMode,
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (data.ValueKind == JsonValueKind.Object
+            && data.TryGetProperty("access_token", out var accessEl)
+            && accessEl.ValueKind == JsonValueKind.String)
+        {
+            string? refresh = data.TryGetProperty("refresh_token", out var refreshEl)
+                && refreshEl.ValueKind == JsonValueKind.String
+                ? refreshEl.GetString()
+                : null;
+            _t.SetTokens(accessEl.GetString()!, refresh);
+
+            JsonElement? policy = data.TryGetProperty("password_policy", out var policyEl)
+                ? policyEl
+                : null;
+            return new LoginResult(false, null, policy);
+        }
+
+        string? challenge = data.ValueKind == JsonValueKind.Object
+            && data.TryGetProperty("response", out var responseEl)
+            && responseEl.ValueKind == JsonValueKind.String
+            ? responseEl.GetString()
+            : null;
+        return new LoginResult(true, challenge);
+    }
+
+    /// <summary>
+    /// Exchange the stored refresh token for a new pair. Both tokens rotate.
+    /// The transport already does this automatically on a <c>401</c> /
+    /// <c>resultType 4</c>, so calling it by hand only refreshes ahead of time.
+    /// </summary>
+    public Task RefreshAsync(CancellationToken cancellationToken = default)
+        => _t.RefreshAsync(cancellationToken);
+
+    /// <summary>
+    /// Revoke the access token and all of its refresh tokens, then clear the store.
+    /// <para>
+    /// Sent with an empty body on purpose: the endpoint also accepts a device-token
+    /// cleanup whose <c>device</c> mapping has no default branch server-side.
+    /// </para>
+    /// </summary>
+    public async Task DisconnectAsync(CancellationToken cancellationToken = default)
+    {
+        await _t.SendAsync(HttpMethod.Post, "/general/disconnectApi", AuthMode.Partner,
+            new { }, cancellationToken).ConfigureAwait(false);
+        _t.ClearTokens();
+    }
+}

@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PackageId>Bulutklinik.Sdk</PackageId>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Authors>Bulutklinik</Authors>
     <Description>Official Bulutklinik partner API SDK for .NET</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

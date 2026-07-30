@@ -30,9 +30,9 @@ internal sealed class Envelope
 /// Low-level transport: builds requests, unwraps the response envelope and maps
 /// failures to typed exceptions.
 /// <para>
-/// There is no silent refresh: a partner token is issued out of band and cannot
-/// be renewed from here, so an expired one (<c>401</c> / <c>resultType 4</c>)
-/// surfaces as an <see cref="AuthenticationException"/> instead of being retried.
+/// On a <c>401</c> / <c>resultType 4</c> it refreshes once and retries the
+/// original request; the error surfaces only when there is no refresh token or
+/// the refresh itself fails. Concurrent refreshes share one in-flight attempt.
 /// </para>
 /// </summary>
 internal sealed class Transport
@@ -51,20 +51,66 @@ internal sealed class Transport
     private readonly string _baseUrl;
     private readonly string _lang;
     private readonly ITokenStore _tokenStore;
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    /// <summary>Used only when the injected store cannot persist the refresh token.</summary>
+    private string? _fallbackRefreshToken;
 
-    internal Transport(HttpClient http, string baseUrl, string lang, ITokenStore tokenStore)
+    internal Transport(HttpClient http, string baseUrl, string lang, string? clientId,
+        string? clientSecret, ITokenStore tokenStore)
     {
         _http = http;
         _baseUrl = baseUrl;
         _lang = lang;
+        ClientId = clientId;
+        ClientSecret = clientSecret;
         _tokenStore = tokenStore;
     }
 
     internal ITokenStore TokenStore => _tokenStore;
 
-    internal async Task<JsonElement> SendAsync(HttpMethod method, string path, AuthMode auth,
-        object? body, CancellationToken cancellationToken)
+    internal string? ClientId { get; }
+
+    internal string? ClientSecret { get; }
+
+    /// <summary>Persist a freshly minted token pair.</summary>
+    internal void SetTokens(string accessToken, string? refreshToken)
     {
+        _tokenStore.SetToken(accessToken);
+        if (_tokenStore is IRefreshTokenStore refreshable)
+        {
+            refreshable.SetRefreshToken(refreshToken);
+        }
+        else
+        {
+            _fallbackRefreshToken = refreshToken;
+        }
+    }
+
+    internal string? GetRefreshToken() =>
+        _tokenStore is IRefreshTokenStore refreshable
+            ? refreshable.GetRefreshToken()
+            : _fallbackRefreshToken;
+
+    internal void ClearTokens()
+    {
+        _fallbackRefreshToken = null;
+        _tokenStore.Clear();
+    }
+
+    /// <summary>Force a refresh using the stored refresh token. Throws on failure.</summary>
+    internal async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        if (!await TryRefreshAsync(null, cancellationToken).ConfigureAwait(false))
+        {
+            throw new AuthenticationException("Token refresh failed",
+                new ApiErrorContext(401, null, null, default, "POST", "/general/refreshApi", null));
+        }
+    }
+
+    internal async Task<JsonElement> SendAsync(HttpMethod method, string path, AuthMode auth,
+        object? body, CancellationToken cancellationToken, bool isRetry = false)
+    {
+        string? staleAccess = auth == AuthMode.Partner ? _tokenStore.GetToken() : null;
         var (status, env, retryAfter) = await DispatchAsync(method, path, auth, body, cancellationToken)
             .ConfigureAwait(false);
 
@@ -73,14 +119,66 @@ internal sealed class Transport
             return env.Data;
         }
 
-        // A revoked token is worth forgetting; an expired one is not, since the
-        // caller may want to inspect it while installing a replacement.
+        bool expired = status == 401 || env.ResultType == 4;
+        if (auth == AuthMode.Partner && expired && !isRetry
+            && await TryRefreshAsync(staleAccess, cancellationToken).ConfigureAwait(false))
+        {
+            return await SendAsync(method, path, auth, body, cancellationToken, true).ConfigureAwait(false);
+        }
+
+        // A revoked session is worth forgetting; a merely expired access token is
+        // not, since the caller may want to inspect it.
         if (env.ResultType == 2)
         {
-            _tokenStore.Clear();
+            ClearTokens();
         }
 
         throw ToException(method, path, status, env, retryAfter);
+    }
+
+    private async Task<bool> TryRefreshAsync(string? staleAccess, CancellationToken cancellationToken)
+    {
+        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (staleAccess is not null && _tokenStore.GetToken() != staleAccess)
+            {
+                return true;
+            }
+
+            string? refreshToken = GetRefreshToken();
+            if (string.IsNullOrEmpty(refreshToken)
+                || string.IsNullOrEmpty(ClientId) || string.IsNullOrEmpty(ClientSecret))
+            {
+                return false;
+            }
+
+            var (status, env, _) = await DispatchAsync(HttpMethod.Post, "/general/refreshApi",
+                AuthMode.Public,
+                new { refreshToken, clientId = ClientId, clientSecretKey = ClientSecret },
+                cancellationToken).ConfigureAwait(false);
+
+            if (status is < 200 or >= 300 || env.ResultType != 0
+                || env.Data.ValueKind != JsonValueKind.Object
+                || !env.Data.TryGetProperty("access_token", out var accessEl)
+                || accessEl.ValueKind != JsonValueKind.String)
+            {
+                ClearTokens();
+                return false;
+            }
+
+            string access = accessEl.GetString()!;
+            string newRefresh = env.Data.TryGetProperty("refresh_token", out var refreshEl)
+                && refreshEl.ValueKind == JsonValueKind.String
+                ? refreshEl.GetString()!
+                : refreshToken;
+            SetTokens(access, newRefresh);
+            return true;
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
     }
 
     private async Task<(int Status, Envelope Envelope, string? RetryAfter)> DispatchAsync(
@@ -93,7 +191,8 @@ internal sealed class Transport
             if (string.IsNullOrEmpty(token))
             {
                 // Dispatching anyway would only come back as an opaque 401.
-                throw new AuthenticationException("No partner token configured.",
+                throw new AuthenticationException(
+                    "No access token available. Call Auth.ConnectAsync, or set PartnerToken.",
                     new ApiErrorContext(0, null, null, default, method.Method, path, null));
             }
         }

@@ -6,13 +6,13 @@ Official Bulutklinik **partner** API SDK for .NET (net8.0). Async
 This is a single-persona SDK: every call runs on the company-scoped `/outher`
 surface with the partner token issued for your integration. You act on the
 patients of **your own company**, and the patient is named inline on each
-request — there is no login and no session. See [`DESIGN.md`](./DESIGN.md) for
-the full wire contract.
+request — there is no patient session. See [`DESIGN.md`](./DESIGN.md) for the
+full wire contract.
 
-> **1.0.0 is a breaking release.** The patient persona (login, registration,
-> payments, AI analysis, address book) has been removed and the former
-> `client.Partner.*` namespace was lifted to the client root. See
-> [CHANGELOG.md](./CHANGELOG.md) and DESIGN.md §12 for the migration.
+> **1.1.0 restores `client.Auth`.** 1.0.x wrongly assumed the partner token could
+> only be issued out of band; it is in fact minted by `connectApi` from your
+> portal credentials, and it is refreshable. Existing 1.0.x code that sets
+> `PartnerToken` keeps working. See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Install
 
@@ -29,8 +29,14 @@ var client = new BulutklinikClient(new BulutklinikClientOptions
 {
     Environment = BulutklinikEnvironment.Production, // Production | Test | Local
     ApiVersion = BulutklinikApiVersion.V3,           // V3 (default) | V4
-    PartnerToken = Environment.GetEnvironmentVariable("BK_PARTNER_TOKEN"),
+    ClientId = Environment.GetEnvironmentVariable("BK_CLIENT_ID"),
+    ClientSecret = Environment.GetEnvironmentVariable("BK_CLIENT_SECRET"),
 });
+
+// 0) Log in. Tokens are stored and refreshed for you.
+await client.Auth.ConnectAsync(
+    Environment.GetEnvironmentVariable("BK_SERVICE_IDENTITY")!,
+    Environment.GetEnvironmentVariable("BK_PASSWORD")!);
 
 // 1) Find a doctor you can book
 var result = await client.Doctors.SearchAsync(
@@ -60,10 +66,11 @@ Every method returns the unwrapped `data` payload as a `JsonElement`.
 
 ## Services
 
-28 endpoints across six groups.
+31 endpoints across seven groups.
 
 | Group                 | Methods |
 |-----------------------|---------|
+| `client.Auth`         | `ConnectAsync`, `RefreshAsync`, `DisconnectAsync` |
 | `client.Doctors`      | `SearchAsync`, `BranchesAsync`, `DetailAsync`, `LocationsAsync` |
 | `client.Slots`        | `ScheduleAsync` |
 | `client.Appointments` | `ReserveAsync`, `ReserveWithoutAgreementAsync`, `InstantReserveAsync`, `CreateAsync`, `CreateWithoutSlotAsync`, `CancelWithoutSlotAsync`, `ListAsync`, `InfoAsync`, `CheckDoctorAsync` |
@@ -125,45 +132,79 @@ and only it.
 
 ## Authentication
 
-The partner token is **issued out of band** through the Bulutklinik Developer
-Platform. It behaves like an API key: there is no login method, and the SDK
-cannot renew it.
-
-The token is read from an `ITokenStore` on **every** request, so a long-running
-process can pick up a newly issued one without being rebuilt:
+Your portal application issues a **client ID**, a **client secret** and a
+project-specific **service identity**; the password is the one you set when
+registering on the portal. `Auth.ConnectAsync` exchanges them for an access token
+and a refresh token:
 
 ```csharp
-public sealed class VaultTokenStore : ITokenStore
+var client = new BulutklinikClient(new BulutklinikClientOptions
+{
+    ClientId = clientId,
+    ClientSecret = clientSecret,
+});
+
+var result = await client.Auth.ConnectAsync(
+    "svc@your-app.bulutklinik",     // service identity
+    "your-portal-password",
+    loginMode: "email");            // the default
+```
+
+The granted scope comes from the credentials, not the request — a partner
+application is provisioned with `apiouther`, which is what makes `/outher`
+reachable. Already holding a token? Set `PartnerToken` and skip the login.
+
+If the account has SMS 2FA enabled the API answers with a challenge instead of a
+token pair; `result.TwoFactorRequired` is then `true` and no token was stored.
+
+### Refresh
+
+Access tokens last ~30 days, refresh tokens ~130. You do not normally call
+`RefreshAsync` yourself: on a `401` / `resultType 4` the SDK refreshes once and
+retries the original request, and concurrent calls share one in-flight refresh.
+
+```csharp
+await client.Auth.RefreshAsync();     // only useful to refresh ahead of time
+await client.Auth.DisconnectAsync();  // revokes both tokens and clears the store
+```
+
+If the refresh fails — or there is no refresh token because you supplied a bare
+`PartnerToken` — the call throws `AuthenticationException` and you should
+`ConnectAsync` again.
+
+### Token storage
+
+Tokens are read from an `ITokenStore` on **every** request, so a long-running
+process can rotate them without being rebuilt. Implement `IRefreshTokenStore` to
+persist both:
+
+```csharp
+public sealed class VaultTokenStore : IRefreshTokenStore
 {
     public string? GetToken() => /* … */;
     public void SetToken(string? token) { /* … */ }
+    public string? GetRefreshToken() => /* … */;
+    public void SetRefreshToken(string? token) { /* … */ }
     public void Clear() { /* … */ }
 }
 
 var client = new BulutklinikClient(new BulutklinikClientOptions
 {
     TokenStore = new VaultTokenStore(),
+    ClientId = clientId,
+    ClientSecret = clientSecret,
 });
-
-// …or rotate the default in-memory store in place:
-client.TokenStore.SetToken(newlyIssuedToken);
 ```
+
+The two refresh members are **optional**. A plain `ITokenStore` — the 1.0.x
+shape, access token only — still works; the SDK then keeps the refresh token in
+memory, so a process restart needs `ConnectAsync` rather than a refresh.
 
 Set `PartnerToken` **or** `TokenStore`, not both — the constructor throws
 `ArgumentException` rather than guessing which one you meant.
 
-### When the token expires
-
-Tokens last about 30 days. An expired one comes back as `401` / `resultType 4`;
-the SDK throws `AuthenticationException` and does **not** retry — there is
-nothing to refresh. Recovery is operational: obtain a newly issued token and
-write it into the store.
-
-> This is the one behaviour that changed meaning in 1.0.0. On the patient SDK
-> `resultType 4` meant "the SDK will fix this silently". Here it means the opposite.
-
 An `AuthorizationException` (403) means the credential itself is wrong — either
-the token lacks the `apiouther` scope, or it resolves to a user with no company.
+the granted scope does not include `apiouther`, or the account has no company.
 The company boundary comes from the token, never from request input, so retrying
 with different body parameters will not help.
 
