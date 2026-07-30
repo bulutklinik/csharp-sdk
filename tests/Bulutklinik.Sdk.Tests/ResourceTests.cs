@@ -5,14 +5,10 @@ using Xunit;
 
 namespace Bulutklinik.Sdk.Tests;
 
-public class PartnerTests
+public class ResourceTests
 {
     private const string Base = "https://apitest.bulutklinik.com/api/v3";
 
-    /// <summary>
-    /// A client with BOTH a patient access token and a partner token configured.
-    /// Partner calls must ignore the patient one.
-    /// </summary>
     private static (BulutklinikClient Client, MockHandler Handler) Make()
     {
         var handler = new MockHandler((_, _) => (HttpStatusCode.OK, "{\"resultType\":0,\"data\":null}"));
@@ -20,7 +16,6 @@ public class PartnerTests
         {
             Environment = BulutklinikEnvironment.Test,
             PartnerToken = "PT",
-            TokenStore = new InMemoryTokenStore("PATIENT"),
             HttpClient = new HttpClient(handler),
         });
         return (client, handler);
@@ -30,12 +25,12 @@ public class PartnerTests
         => JsonDocument.Parse(handler.Bodies[index]).RootElement;
 
     [Fact]
-    public async Task SendsPartnerTokenNeverPatientToken()
+    public async Task EveryCallUsesThePartnerToken()
     {
         var (client, handler) = Make();
 
-        await client.Partner.Doctors.BranchesAsync();
-        await client.Partner.Measures.LastAsync(new Patient { IdentityNumber = "12345678901" });
+        await client.Doctors.BranchesAsync();
+        await client.Measures.LastAsync(new Patient { IdentityNumber = "12345678901" });
 
         foreach (var request in handler.Requests)
         {
@@ -44,26 +39,15 @@ public class PartnerTests
     }
 
     [Fact]
-    public async Task PatientSurfaceKeepsPatientToken()
-    {
-        var (client, handler) = Make();
-
-        await client.Doctors.BranchesAsync();
-
-        Assert.Equal("Bearer PATIENT", handler.Requests[0].Headers.Authorization!.ToString());
-        Assert.Equal($"{Base}/patients/allBranches", handler.Requests[0].RequestUri!.ToString());
-    }
-
-    [Fact]
     public async Task BuildsDiscoveryPaths()
     {
         var (client, handler) = Make();
 
-        await client.Partner.Doctors.LocationsAsync();
-        await client.Partner.Doctors.DetailAsync(42);
-        await client.Partner.Laboratory.CatalogAsync();
-        await client.Partner.Laboratory.CatalogDetailAsync(18246);
-        await client.Partner.Slots.ScheduleAsync(7, "2026-08-01");
+        await client.Doctors.LocationsAsync();
+        await client.Doctors.DetailAsync(42);
+        await client.Laboratory.CatalogAsync();
+        await client.Laboratory.CatalogDetailAsync(18246);
+        await client.Slots.ScheduleAsync(7, "2026-08-01");
 
         var expected = new[]
         {
@@ -83,9 +67,9 @@ public class PartnerTests
         var (client, handler) = Make();
         var patient = new Patient { IdentityNumber = "12345678901" };
 
-        await client.Partner.Diets.ListAsync(patient, 2);
-        await client.Partner.Measures.ListAsync(patient, "glucose", 1, 0);
-        await client.Partner.Laboratory.ResultsAsync(patient);
+        await client.Diets.ListAsync(patient, 2);
+        await client.Measures.ListAsync(patient, "glucose", 1, 0);
+        await client.Laboratory.ResultsAsync(patient);
 
         // The identity number must never leak into a URL — it would land in access
         // logs, proxy logs and error breadcrumbs.
@@ -108,10 +92,10 @@ public class PartnerTests
         var (client, handler) = Make();
         var patient = new Patient { IdentityNumber = "12345678901" };
 
-        await client.Partner.Laboratory.ResultDetailAsync(patient, "1234-lab");
+        await client.Laboratory.ResultDetailAsync(patient, "1234-lab");
         Assert.Equal("1234-lab", BodyOf(handler, 0).GetProperty("testId").GetString());
 
-        await client.Partner.Laboratory.ResultDetailAsync(patient, 1234);
+        await client.Laboratory.ResultDetailAsync(patient, 1234);
         Assert.Equal("1234", BodyOf(handler, 1).GetProperty("testId").GetString());
     }
 
@@ -122,19 +106,19 @@ public class PartnerTests
         var writePatient = new Patient { Name = "Ada", Surname = "Lovelace", PhoneNumber = "+905551112233" };
         var reference = new Patient { IdentityNumber = "12345678901" };
 
-        await client.Partner.Measures.AddListAsync(writePatient, new IDictionary<string, object?>[]
+        await client.Measures.AddListAsync(writePatient, new IDictionary<string, object?>[]
         {
             new Dictionary<string, object?> { ["type"] = "pulse", ["date_time"] = "2026-06-17 09:00", ["pulse"] = 72 },
         });
-        await client.Partner.Measures.AddAsync(writePatient, "tension", new Dictionary<string, object?>
+        await client.Measures.AddAsync(writePatient, "tension", new Dictionary<string, object?>
         {
             ["date_time"] = "2026-06-17 09:00", ["hypertension"] = 120, ["hypotension"] = 80,
         });
-        await client.Partner.Measures.UpdateAsync(reference, "tension", 9, new Dictionary<string, object?>
+        await client.Measures.UpdateAsync(reference, "tension", 9, new Dictionary<string, object?>
         {
             ["date_time"] = "2026-06-17 10:00", ["hypertension"] = 125, ["hypotension"] = 85,
         });
-        await client.Partner.Measures.DeleteAsync(reference, "tension", 9);
+        await client.Measures.DeleteAsync(reference, "tension", 9);
 
         var seen = handler.Requests.Select(r => (r.Method.Method, r.RequestUri!.ToString())).ToArray();
 
@@ -157,10 +141,10 @@ public class PartnerTests
         var (client, handler) = Make();
         var user = new Patient { Name = "Ada", Surname = "Lovelace", PhoneNumber = "+905551112233" };
 
-        await client.Partner.Appointments.ReserveAsync(1, 2, user);
-        await client.Partner.Appointments.CreateAsync("h", 5);
-        await client.Partner.Appointments.ListAsync("+905551112233");
-        await client.Partner.Appointments.CancelWithoutSlotAsync(
+        await client.Appointments.ReserveAsync(1, 2, user);
+        await client.Appointments.CreateAsync("h", 5);
+        await client.Appointments.ListAsync("+905551112233");
+        await client.Appointments.CancelWithoutSlotAsync(
             new AppointmentLookup { Hash = "h", OutherProcessId = 5 });
 
         var seen = handler.Requests.Select(r => (r.Method.Method, r.RequestUri!.ToString())).ToArray();
@@ -174,5 +158,63 @@ public class PartnerTests
         }, seen);
 
         Assert.Equal(1, BodyOf(handler, 0).GetProperty("slotId").GetInt32());
+    }
+
+    [Fact]
+    public async Task RemainingAppointmentEndpoints()
+    {
+        var (client, handler) = Make();
+        var user = new Patient { Name = "Ada", Surname = "Lovelace", PhoneNumber = "+905551112233" };
+
+        await client.Appointments.CheckDoctorAsync(2, 0);
+        await client.Appointments.ReserveWithoutAgreementAsync(1, 2, user);
+        await client.Appointments.InstantReserveAsync(user);
+        await client.Appointments.CreateWithoutSlotAsync(2, "2026-08-01 09:00", "2026-08-01 09:30", user);
+        await client.Appointments.InfoAsync(new AppointmentLookup { Hash = "h", OutherProcessId = 5 });
+
+        Assert.Equal(new[]
+        {
+            $"{Base}/outher/checkDoctor",
+            $"{Base}/outher/reservationWithoutAgreement",
+            $"{Base}/outher/instantReservation",
+            $"{Base}/outher/appointmentWithoutSlot",
+            $"{Base}/outher/appointmentInfo",
+        }, handler.Requests.Select(r => r.RequestUri!.ToString()).ToArray());
+    }
+
+    [Fact]
+    public async Task MeasuresGraphPathAndLegacyTeusanShape()
+    {
+        var (client, handler) = Make();
+
+        await client.Measures.GraphAsync(new Patient { PhoneNumber = "+905551112233" }, "weight", 3);
+        Assert.Equal($"{Base}/outher/measuresGraph/weight/3", handler.Requests[0].RequestUri!.ToString());
+
+#pragma warning disable CS0618 // deliberately exercising the deprecated legacy endpoint
+        await client.Measures.HealthInformationAsync("12345678901", "+905551112233",
+            new IDictionary<string, object?>[]
+            {
+                new Dictionary<string, object?> { ["type"] = "pulse", ["date_time"] = "2026-06-17 09:00", ["pulse"] = 72 },
+            });
+#pragma warning restore CS0618
+
+        Assert.Equal($"{Base}/outher/healthInformation", handler.Requests[1].RequestUri!.ToString());
+        // No `patient` wrapper here — this endpoint predates that contract.
+        Assert.False(BodyOf(handler, 1).TryGetProperty("patient", out _));
+        Assert.Equal("12345678901", BodyOf(handler, 1).GetProperty("identity").GetString());
+    }
+
+    [Fact]
+    public async Task DietDetailAndCatalogDetailPaths()
+    {
+        var (client, handler) = Make();
+        var reference = new Patient { IdentityNumber = "12345678901" };
+
+        await client.Diets.DetailAsync(reference, 77);
+        await client.Laboratory.CatalogDetailAsync(18246);
+
+        Assert.Equal($"{Base}/outher/diet", handler.Requests[0].RequestUri!.ToString());
+        Assert.Equal(77, BodyOf(handler, 0).GetProperty("listId").GetInt32());
+        Assert.Equal($"{Base}/outher/laboratoryCatalog/18246", handler.Requests[1].RequestUri!.ToString());
     }
 }

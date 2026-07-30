@@ -4,6 +4,58 @@ All notable changes to `Bulutklinik.Sdk` are documented here. The format is base
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0]
+
+The SDK becomes **partner-only**. Everything that required a patient login is
+gone; the company-scoped `/outher` surface that shipped under `client.Partner`
+in 0.6.0 is now the client root. See `DESIGN.md` §12 for the full migration.
+
+### Changed — BREAKING
+
+- **`client.Partner.<Group>` → `client.<Group>`.** The six partner groups
+  (`Doctors`, `Slots`, `Appointments`, `Measures`, `Laboratory`, `Diets`) moved
+  to the root. Their paths, bodies and behaviour are unchanged — this is a
+  rename. Resource classes lost the `Partner` prefix (`PartnerDoctorsResource` →
+  `DoctorsResource`); `PartnerNamespace` is gone.
+- **`ITokenStore` now holds one partner token**: `GetToken()` /
+  `SetToken(string?)` / `Clear()` replace `GetAccessToken()` /
+  `GetRefreshToken()` / `SetTokens()`. `InMemoryTokenStore` takes the token as
+  its single constructor argument.
+- **`PartnerToken` is now the client's credential** and is required for every
+  call. Setting both `PartnerToken` and `TokenStore` throws `ArgumentException`
+  at construction rather than silently picking one.
+- **No silent refresh.** A `401` / `resultType 4` throws `AuthenticationException`
+  with no retry — a partner token is issued out of band and cannot be renewed
+  from here. Install a newly issued token in the token store instead.
+- **A missing token fails before dispatch** with `AuthenticationException`,
+  rather than sending an anonymous request that returns an opaque `401`.
+- **`RequestAsync` `auth` defaults to `"partner"`**; the `"bearer"` mode no
+  longer exists. `"public"` remains, for unauthenticated endpoints outside the
+  surface.
+- `Measures.PartnerHealthInformationAsync` → `Measures.HealthInformationAsync`.
+- `Doctors.SearchAsync` no longer accepts `otherParams` / `perPageLimit`, and
+  `orderParams` no longer accepts `point` — the `/outher` search has neither.
+
+### Added
+
+- **`BulutklinikApiVersion` (`V3` / `V4`) and `BulutklinikClientOptions.ApiVersion`.**
+  Every path is version-agnostic, so targeting v4 is configuration, not a code
+  change. Default stays `V3`.
+
+### Removed
+
+- `client.Auth` (all 11 methods), `client.Payments` (5), `client.Skin`,
+  `client.Meals`, `client.Addresses` (4) — no company-scoped equivalent exists.
+- The patient-persona `Doctors` / `Slots` / `Appointments` / `Measures` /
+  `Laboratory` / `Diets` that lived at the root in 0.6.0.
+- `BulutklinikClientOptions.ClientId` / `.ClientSecret`.
+- The `LoginResult`, `ConnectInput`, `RegisterInput`, `VerifyRegistrationInput`,
+  `ConfirmRegistrationEmailInput`, `VerifyRegistrationSocialInput`,
+  `RegisterSocialInput`, `ForgotPasswordInput`, `ResetPasswordInput`,
+  `AddressInput`, `AddressUpdateInput`, `SearchInput`, `ScheduleInput`,
+  `DiscountInput`, `CardInfo`, `PaymentInput`, `MealInput` and `LabOrderInput`
+  types.
+
 ## [0.6.0]
 
 ### Added

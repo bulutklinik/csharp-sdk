@@ -32,49 +32,121 @@ internal sealed class MockHandler : HttpMessageHandler
 
 public class TransportTests
 {
-    private static (BulutklinikClient Client, MockHandler Handler) Make(
+    internal static readonly Patient Ref = new() { IdentityNumber = "12345678901" };
+
+    /// <summary>
+    /// A client wired to a mock handler. Unless <paramref name="tokenStore"/>
+    /// overrides it, the credential is the partner token "PT".
+    /// </summary>
+    internal static (BulutklinikClient Client, MockHandler Handler) Make(
         Func<HttpRequestMessage, string, (HttpStatusCode, string)> responder,
-        ITokenStore? tokenStore = null, string? clientId = null, string? clientSecret = null, string? partnerToken = null)
+        ITokenStore? tokenStore = null)
     {
         var handler = new MockHandler(responder);
         var client = new BulutklinikClient(new BulutklinikClientOptions
         {
             BaseUrl = "http://localhost",
             HttpClient = new HttpClient(handler),
-            TokenStore = tokenStore,
-            ClientId = clientId,
-            ClientSecret = clientSecret,
-            PartnerToken = partnerToken,
+            TokenStore = tokenStore ?? new InMemoryTokenStore("PT"),
         });
         return (client, handler);
     }
 
+    private static (HttpStatusCode, string) Ok(HttpRequestMessage _, string __)
+        => (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"ok\":true}}");
+
     [Fact]
-    public async Task UnwrapsDataAndSendsHeaders()
+    public async Task UnwrapsDataAndSendsPartnerTokenAndLang()
     {
-        var (client, handler) = Make((_, _) => (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"searchedDoctors\":[]}}"),
-            new InMemoryTokenStore("abc"));
+        var (client, handler) = Make((_, _) =>
+            (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"foundDoctors\":[]}}"));
 
-        var data = await client.Doctors.QuickSearchAsync("kardiyo");
+        var data = await client.Doctors.SearchAsync(
+            new Dictionary<string, object?> { ["withFreeText"] = "kardiyoloji" }, 1, new[] { "slot" });
 
-        Assert.Equal(JsonValueKind.Array, data.GetProperty("searchedDoctors").ValueKind);
-        Assert.Equal("/patients/quickSearch", handler.Requests[0].RequestUri!.AbsolutePath);
-        Assert.Equal("Bearer abc", handler.Requests[0].Headers.Authorization!.ToString());
-        Assert.Contains("\"searchText\":\"kardiyo\"", handler.Bodies[0]);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("foundDoctors").ValueKind);
+        Assert.Equal("/outher/search", handler.Requests[0].RequestUri!.AbsolutePath);
+        Assert.Equal("Bearer PT", handler.Requests[0].Headers.Authorization!.ToString());
+        Assert.Equal("tr", handler.Requests[0].Headers.GetValues("lang").Single());
+        Assert.Contains("\"currentPage\":1", handler.Bodies[0]);
+    }
+
+    [Theory]
+    [InlineData(BulutklinikApiVersion.V3, "https://apitest.bulutklinik.com/api/v3/outher/branches")]
+    [InlineData(BulutklinikApiVersion.V4, "https://apitest.bulutklinik.com/api/v4/outher/branches")]
+    public async Task ApiVersionChangesOnlyTheBaseUrl(BulutklinikApiVersion version, string expected)
+    {
+        var handler = new MockHandler(Ok);
+        var client = new BulutklinikClient(new BulutklinikClientOptions
+        {
+            Environment = BulutklinikEnvironment.Test,
+            ApiVersion = version,
+            PartnerToken = "PT",
+            HttpClient = new HttpClient(handler),
+        });
+
+        await client.Doctors.BranchesAsync();
+
+        Assert.Equal(expected, handler.Requests[0].RequestUri!.ToString());
     }
 
     [Fact]
-    public async Task RequestEscapeHatchCallsArbitraryPathWithBearer()
+    public void PartnerTokenAndTokenStoreTogetherIsRejected()
     {
-        var (client, handler) = Make((_, _) => (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"ok\":true}}"),
-            new InMemoryTokenStore("abc"));
+        var ex = Assert.Throws<ArgumentException>(() => new BulutklinikClient(new BulutklinikClientOptions
+        {
+            PartnerToken = "PT",
+            TokenStore = new InMemoryTokenStore("OTHER"),
+        }));
+        Assert.Contains("not both", ex.Message);
+    }
 
-        var data = await client.RequestAsync(HttpMethod.Get, "/patients/customEndpoint");
+    [Fact]
+    public void PartnerTokenSeedsTheDefaultStore()
+    {
+        var client = new BulutklinikClient(new BulutklinikClientOptions { PartnerToken = "PT" });
+        Assert.Equal("PT", client.TokenStore.GetToken());
+    }
+
+    [Fact]
+    public async Task MissingTokenFailsBeforeDispatch()
+    {
+        int dispatched = 0;
+        var (client, _) = Make((req, body) =>
+        {
+            dispatched++;
+            return Ok(req, body);
+        }, new InMemoryTokenStore());
+
+        await Assert.ThrowsAsync<AuthenticationException>(() => client.Doctors.BranchesAsync());
+        Assert.Equal(0, dispatched);
+    }
+
+    [Fact]
+    public async Task TokenIsReadFromTheStoreOnEveryCall()
+    {
+        var store = new InMemoryTokenStore("first");
+        var (client, handler) = Make(Ok, store);
+
+        await client.Doctors.BranchesAsync();
+        store.SetToken("second");
+        await client.Doctors.BranchesAsync();
+
+        Assert.Equal("Bearer first", handler.Requests[0].Headers.Authorization!.ToString());
+        Assert.Equal("Bearer second", handler.Requests[1].Headers.Authorization!.ToString());
+    }
+
+    [Fact]
+    public async Task RequestEscapeHatchDefaultsToPartner()
+    {
+        var (client, handler) = Make(Ok);
+
+        var data = await client.RequestAsync(HttpMethod.Get, "/outher/customEndpoint");
 
         Assert.True(data.GetProperty("ok").GetBoolean());
-        Assert.Equal("/patients/customEndpoint", handler.Requests[0].RequestUri!.AbsolutePath);
+        Assert.Equal("/outher/customEndpoint", handler.Requests[0].RequestUri!.AbsolutePath);
         Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
-        Assert.Equal("Bearer abc", handler.Requests[0].Headers.Authorization!.ToString());
+        Assert.Equal("Bearer PT", handler.Requests[0].Headers.Authorization!.ToString());
     }
 
     [Fact]
@@ -94,77 +166,53 @@ public class TransportTests
     [Fact]
     public async Task MapsValidation()
     {
-        var (client, _) = Make((_, _) => (HttpStatusCode.UnprocessableEntity, "{\"resultType\":1,\"errorType\":\"validation\"}"),
-            new InMemoryTokenStore("a"));
+        var (client, _) = Make((_, _) =>
+            (HttpStatusCode.UnprocessableEntity, "{\"resultType\":1,\"errorType\":\"validation\"}"));
         await Assert.ThrowsAsync<ValidationException>(() => client.Doctors.BranchesAsync());
+    }
+
+    [Fact]
+    public async Task MapsForbiddenToAuthorization()
+    {
+        var (client, _) = Make((_, _) => (HttpStatusCode.Forbidden, "{\"resultType\":1}"));
+        await Assert.ThrowsAsync<AuthorizationException>(() => client.Doctors.BranchesAsync());
     }
 
     [Fact]
     public async Task MapsNumeric404ToNotFound()
     {
-        var (client, _) = Make((_, _) => (HttpStatusCode.NotFound, "{\"resultType\":1,\"errorType\":1,\"errorMessage\":\"Bilinmeyen\"}"),
-            new InMemoryTokenStore("a"));
-        await Assert.ThrowsAsync<NotFoundException>(() => client.Doctors.QuickSearchAsync("x"));
+        var (client, _) = Make((_, _) =>
+            (HttpStatusCode.NotFound, "{\"resultType\":1,\"errorType\":1,\"errorMessage\":\"Bilinmeyen\"}"));
+        await Assert.ThrowsAsync<NotFoundException>(() => client.Doctors.BranchesAsync());
     }
 
     [Fact]
-    public async Task RefreshesOnceThenRetries()
+    public async Task ExpiredTokenIsNotRetried()
     {
-        int dataCalls = 0;
-        var store = new InMemoryTokenStore("old", "r");
-        var (client, _) = Make((req, _) =>
+        int attempts = 0;
+        var store = new InMemoryTokenStore("expired");
+        var (client, _) = Make((_, _) =>
         {
-            if (req.RequestUri!.AbsolutePath == "/general/refreshApi")
-            {
-                return (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"access_token\":\"new\",\"refresh_token\":\"r2\"}}");
-            }
-            dataCalls++;
-            return dataCalls == 1
-                ? (HttpStatusCode.Unauthorized, "{\"resultType\":4}")
-                : (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"ok\":true}}");
-        }, store, "c", "s");
+            attempts++;
+            return (HttpStatusCode.Unauthorized, "{\"resultType\":4,\"errorMessage\":\"You must log in.\"}");
+        }, store);
 
-        var data = await client.Measures.LastAsync();
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => client.Measures.LastAsync(Ref));
 
-        Assert.True(data.GetProperty("ok").GetBoolean());
-        Assert.Equal("new", store.GetAccessToken());
+        Assert.Contains("cannot refresh it", ex.Message);
+        Assert.Equal(1, attempts);
+        // An expired token is kept: the caller may want to inspect it while
+        // installing the replacement. Only a revoked one is cleared.
+        Assert.Equal("expired", store.GetToken());
     }
 
     [Fact]
     public async Task LogoutClearsStore()
     {
-        var store = new InMemoryTokenStore("a", "r");
+        var store = new InMemoryTokenStore("revoked");
         var (client, _) = Make((_, _) => (HttpStatusCode.OK, "{\"resultType\":2,\"errorMessage\":\"logged out\"}"), store);
 
-        await Assert.ThrowsAsync<AuthenticationException>(() => client.Measures.LastAsync());
-        Assert.Null(store.GetAccessToken());
-    }
-
-    [Fact]
-    public async Task ConnectStoresTokensAndFillsCredentials()
-    {
-        var store = new InMemoryTokenStore();
-        var (client, handler) = Make((_, _) => (HttpStatusCode.OK, "{\"resultType\":0,\"data\":{\"access_token\":\"t\",\"refresh_token\":\"r\"}}"),
-            store, "c", "s");
-
-        var result = await client.Auth.ConnectAsync("u", "p", "email");
-
-        Assert.False(result.TwoFactorRequired);
-        Assert.Equal("t", store.GetAccessToken());
-        Assert.Contains("\"apiClientId\":\"c\"", handler.Bodies[0]);
-    }
-
-    [Fact]
-    public async Task UsesPartnerToken()
-    {
-        var (client, handler) = Make((_, _) => (HttpStatusCode.OK, "{\"resultType\":0,\"data\":null}"),
-            new InMemoryTokenStore("a"), partnerToken: "PT");
-
-        await client.Measures.PartnerHealthInformationAsync(null, "5551112233", new IDictionary<string, object?>[]
-        {
-            new Dictionary<string, object?> { ["type"] = "pulse", ["date_time"] = "2026-06-17 09:00", ["pulse"] = 72 },
-        });
-
-        Assert.Equal("Bearer PT", handler.Requests[^1].Headers.Authorization!.ToString());
+        await Assert.ThrowsAsync<AuthenticationException>(() => client.Measures.LastAsync(Ref));
+        Assert.Null(store.GetToken());
     }
 }

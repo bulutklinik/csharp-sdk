@@ -8,7 +8,6 @@ namespace Bulutklinik.Sdk;
 internal enum AuthMode
 {
     Public,
-    Bearer,
     Partner,
 }
 
@@ -27,6 +26,15 @@ internal sealed class Envelope
     public JsonElement Data { get; init; }
 }
 
+/// <summary>
+/// Low-level transport: builds requests, unwraps the response envelope and maps
+/// failures to typed exceptions.
+/// <para>
+/// There is no silent refresh: a partner token is issued out of band and cannot
+/// be renewed from here, so an expired one (<c>401</c> / <c>resultType 4</c>)
+/// surfaces as an <see cref="AuthenticationException"/> instead of being retried.
+/// </para>
+/// </summary>
 internal sealed class Transport
 {
     private static readonly JsonSerializerOptions SerializeOptions = new()
@@ -42,34 +50,21 @@ internal sealed class Transport
     private readonly HttpClient _http;
     private readonly string _baseUrl;
     private readonly string _lang;
-    private readonly string? _clientId;
-    private readonly string? _clientSecret;
-    private readonly string? _partnerToken;
     private readonly ITokenStore _tokenStore;
-    private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
-    internal Transport(HttpClient http, string baseUrl, string lang, string? clientId,
-        string? clientSecret, string? partnerToken, ITokenStore tokenStore)
+    internal Transport(HttpClient http, string baseUrl, string lang, ITokenStore tokenStore)
     {
         _http = http;
         _baseUrl = baseUrl;
         _lang = lang;
-        _clientId = clientId;
-        _clientSecret = clientSecret;
-        _partnerToken = partnerToken;
         _tokenStore = tokenStore;
     }
 
     internal ITokenStore TokenStore => _tokenStore;
 
-    internal string? ClientId => _clientId;
-
-    internal string? ClientSecret => _clientSecret;
-
     internal async Task<JsonElement> SendAsync(HttpMethod method, string path, AuthMode auth,
-        object? body, CancellationToken cancellationToken, bool isRetry = false)
+        object? body, CancellationToken cancellationToken)
     {
-        string? staleAccess = auth == AuthMode.Bearer ? _tokenStore.GetAccessToken() : null;
         var (status, env, retryAfter) = await DispatchAsync(method, path, auth, body, cancellationToken)
             .ConfigureAwait(false);
 
@@ -78,13 +73,8 @@ internal sealed class Transport
             return env.Data;
         }
 
-        bool expired = status == 401 || env.ResultType == 4;
-        if (auth == AuthMode.Bearer && expired && !isRetry
-            && await TryRefreshAsync(staleAccess, cancellationToken).ConfigureAwait(false))
-        {
-            return await SendAsync(method, path, auth, body, cancellationToken, true).ConfigureAwait(false);
-        }
-
+        // A revoked token is worth forgetting; an expired one is not, since the
+        // caller may want to inspect it while installing a replacement.
         if (env.ResultType == 2)
         {
             _tokenStore.Clear();
@@ -93,18 +83,21 @@ internal sealed class Transport
         throw ToException(method, path, status, env, retryAfter);
     }
 
-    internal async Task RefreshAsync(CancellationToken cancellationToken)
-    {
-        if (!await TryRefreshAsync(null, cancellationToken).ConfigureAwait(false))
-        {
-            throw ApiException.Create("token refresh failed",
-                new ApiErrorContext(401, null, null, default, "POST", "/general/refreshApi", null));
-        }
-    }
-
     private async Task<(int Status, Envelope Envelope, string? RetryAfter)> DispatchAsync(
         HttpMethod method, string path, AuthMode auth, object? body, CancellationToken cancellationToken)
     {
+        string? token = null;
+        if (auth == AuthMode.Partner)
+        {
+            token = _tokenStore.GetToken();
+            if (string.IsNullOrEmpty(token))
+            {
+                // Dispatching anyway would only come back as an opaque 401.
+                throw new AuthenticationException("No partner token configured.",
+                    new ApiErrorContext(0, null, null, default, method.Method, path, null));
+            }
+        }
+
         using var request = new HttpRequestMessage(method, _baseUrl + path);
         request.Headers.TryAddWithoutValidation("Accept", "application/json");
         request.Headers.TryAddWithoutValidation("lang", _lang);
@@ -115,17 +108,9 @@ internal sealed class Transport
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }
 
-        if (auth == AuthMode.Bearer)
+        if (token is not null)
         {
-            string? token = _tokenStore.GetAccessToken();
-            if (!string.IsNullOrEmpty(token))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            }
-        }
-        else if (auth == AuthMode.Partner && !string.IsNullOrEmpty(_partnerToken))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _partnerToken);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
 
         HttpResponseMessage response;
@@ -165,48 +150,6 @@ internal sealed class Transport
         catch (JsonException)
         {
             return new Envelope { ErrorMessage = text };
-        }
-    }
-
-    private async Task<bool> TryRefreshAsync(string? staleAccess, CancellationToken cancellationToken)
-    {
-        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (staleAccess is not null && _tokenStore.GetAccessToken() != staleAccess)
-            {
-                return true;
-            }
-
-            string? refreshToken = _tokenStore.GetRefreshToken();
-            if (string.IsNullOrEmpty(refreshToken) || string.IsNullOrEmpty(_clientId) || string.IsNullOrEmpty(_clientSecret))
-            {
-                return false;
-            }
-
-            var (status, env, _) = await DispatchAsync(HttpMethod.Post, "/general/refreshApi", AuthMode.Public,
-                new { refreshToken, clientId = _clientId, clientSecretKey = _clientSecret }, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (status is < 200 or >= 300 || env.ResultType != 0 || env.Data.ValueKind != JsonValueKind.Object
-                || !env.Data.TryGetProperty("access_token", out var accessEl)
-                || accessEl.ValueKind != JsonValueKind.String)
-            {
-                _tokenStore.Clear();
-                return false;
-            }
-
-            string access = accessEl.GetString()!;
-            string newRefresh = env.Data.TryGetProperty("refresh_token", out var refreshEl)
-                && refreshEl.ValueKind == JsonValueKind.String
-                ? refreshEl.GetString()!
-                : refreshToken;
-            _tokenStore.SetTokens(access, newRefresh);
-            return true;
-        }
-        finally
-        {
-            _refreshLock.Release();
         }
     }
 

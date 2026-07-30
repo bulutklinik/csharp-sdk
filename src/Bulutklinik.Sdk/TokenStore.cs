@@ -1,16 +1,20 @@
 namespace Bulutklinik.Sdk;
 
 /// <summary>
-/// Pluggable token persistence. The default is in-memory; implement this to
-/// persist tokens elsewhere. A null return means "no token".
+/// Pluggable source for the partner token.
+/// <para>
+/// The token is read on <b>every</b> request, so pointing this at a file, cache,
+/// database or secret manager lets a long-running process pick up a newly issued
+/// token without being rebuilt. A null return means "no token"; the transport then
+/// fails before dispatching rather than sending an anonymous request.
+/// </para>
+/// <para>Implementations must be thread-safe.</para>
 /// </summary>
 public interface ITokenStore
 {
-    string? GetAccessToken();
+    string? GetToken();
 
-    string? GetRefreshToken();
-
-    void SetTokens(string accessToken, string? refreshToken);
+    void SetToken(string? token);
 
     void Clear();
 }
@@ -19,37 +23,23 @@ public interface ITokenStore
 public sealed class InMemoryTokenStore : ITokenStore
 {
     private readonly object _lock = new();
-    private string? _accessToken;
-    private string? _refreshToken;
+    private string? _token;
 
-    public InMemoryTokenStore(string? accessToken = null, string? refreshToken = null)
-    {
-        _accessToken = accessToken;
-        _refreshToken = refreshToken;
-    }
+    public InMemoryTokenStore(string? token = null) => _token = token;
 
-    public string? GetAccessToken()
+    public string? GetToken()
     {
         lock (_lock)
         {
-            return _accessToken;
+            return _token;
         }
     }
 
-    public string? GetRefreshToken()
+    public void SetToken(string? token)
     {
         lock (_lock)
         {
-            return _refreshToken;
-        }
-    }
-
-    public void SetTokens(string accessToken, string? refreshToken)
-    {
-        lock (_lock)
-        {
-            _accessToken = accessToken;
-            _refreshToken = refreshToken;
+            _token = token;
         }
     }
 
@@ -57,8 +47,7 @@ public sealed class InMemoryTokenStore : ITokenStore
     {
         lock (_lock)
         {
-            _accessToken = null;
-            _refreshToken = null;
+            _token = null;
         }
     }
 }

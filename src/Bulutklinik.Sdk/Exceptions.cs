@@ -51,6 +51,16 @@ public class ApiException : BulutklinikException
             return new AuthenticationException(message, context);
         }
 
+        // resultType 4 used to trigger a silent refresh. On the partner surface
+        // there is nothing to refresh, so say what the caller actually has to do.
+        if (context.ResultType == 4)
+        {
+            return new AuthenticationException(
+                message + " The partner token is expired or invalid — install a newly issued token;"
+                + " the SDK cannot refresh it.",
+                context);
+        }
+
         bool validation =
             (context.ErrorType is string s && string.Equals(s, "validation", StringComparison.OrdinalIgnoreCase))
             || context.HttpStatus == 422;
@@ -78,7 +88,7 @@ public sealed class ValidationException : ApiException
     }
 }
 
-/// <summary>401, a logout (resultType 2), or a failed token refresh.</summary>
+/// <summary>401, a revoked token (resultType 2), or an expired one (resultType 4).</summary>
 public sealed class AuthenticationException : ApiException
 {
     public AuthenticationException(string message, ApiErrorContext context) : base(message, context)
@@ -86,7 +96,12 @@ public sealed class AuthenticationException : ApiException
     }
 }
 
-/// <summary>403 — authenticated but not permitted / out of scope.</summary>
+/// <summary>
+/// 403 — the token authenticated but is not permitted. Either it lacks the
+/// <c>apiouther</c> scope or it resolves to a user with no company. The company
+/// boundary comes from the token, never from request input, so retrying with
+/// different body parameters will not help.
+/// </summary>
 public sealed class AuthorizationException : ApiException
 {
     public AuthorizationException(string message, ApiErrorContext context) : base(message, context)
