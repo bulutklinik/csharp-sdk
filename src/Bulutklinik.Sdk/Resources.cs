@@ -390,9 +390,10 @@ public sealed class MeasuresResource
 /// <summary>
 /// Token lifecycle.
 /// <para>
-/// The Developer Platform issues a <b>client id</b>, a <b>client secret</b> and a
-/// project-specific <b>service identity</b> per approved application; the password
-/// is the one set when registering on the portal. <see cref="ConnectAsync"/>
+/// The Developer Platform issues a <b>client id</b>, a <b>client secret</b>, a
+/// project-specific <b>service identity</b> and an <b>application password</b> per
+/// approved application. The password belongs to that application only — it is not
+/// the developer's portal account password. <see cref="ConnectAsync"/>
 /// exchanges those for an access + refresh token pair, which every other resource
 /// then uses.
 /// </para>
