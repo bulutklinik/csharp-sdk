@@ -53,7 +53,7 @@ var held = await client.Appointments.ReserveWithoutAgreementAsync(slotId, doctor
 {
     Name = "Ada",
     Surname = "Lovelace",
-    PhoneNumber = "+905551112233",
+    PhoneNumber = "+90 5551112233",
 });
 
 // 4) Confirm before held.reservationExpired passes
@@ -89,7 +89,7 @@ company and never creates anything:
 
 ```csharp
 await client.Measures.LastAsync(new Patient { IdentityNumber = "12345678901" });
-await client.Diets.ListAsync(new Patient { PhoneNumber = "+905551112233" });
+await client.Diets.ListAsync(new Patient { PhoneNumber = "+90 5551112233" });
 ```
 
 `IdentityNumber` is primary; `PhoneNumber` is a fallback accepted only when it
@@ -102,7 +102,7 @@ created inside your company if absent:
 
 ```csharp
 await client.Measures.AddListAsync(
-    new Patient { Name = "Ada", Surname = "Lovelace", PhoneNumber = "+905551112233" },
+    new Patient { Name = "Ada", Surname = "Lovelace", PhoneNumber = "+90 5551112233" },
     new IDictionary<string, object?>[]
     {
         new Dictionary<string, object?> { ["type"] = "pulse", ["date_time"] = "2026-06-17 09:31", ["pulse"] = 72 },
